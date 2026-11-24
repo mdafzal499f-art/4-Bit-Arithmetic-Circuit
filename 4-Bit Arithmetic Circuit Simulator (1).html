@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>4-Bit Arithmetic Circuit Simulator</title>
+<style>
+:root{--bg:#f7f7f5;--card:#fff;--tx:#1d1d1b;--mu:#6b6b66;--bd:#d9d9d3;--hi:#16a34a;--lo:#a3a39b;--ac:#2563eb;--bad:#dc2626;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#141413;--card:#1f1f1d;--tx:#eeeeea;--mu:#9a9a93;--bd:#3a3a36;--hi:#4ade80;--lo:#5c5c56;--ac:#60a5fa;--bad:#f87171;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#141413;--card:#1f1f1d;--tx:#eeeeea;--mu:#9a9a93;--bd:#3a3a36;--hi:#4ade80;--lo:#5c5c56;--ac:#60a5fa;--bad:#f87171;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;padding:14px;max-width:900px;margin:auto}
+h1{font-size:20px;margin:6px 0}h2{font-size:16px;margin:0 0 8px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;margin:12px 0}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.lbl{width:34px;color:var(--mu);font-weight:600}
+button{font:inherit;border:1px solid var(--bd);background:var(--card);color:var(--tx);border-radius:8px;padding:8px 12px;cursor:pointer}
+.bit{width:44px;height:44px;font-weight:700;font-family:monospace;font-size:18px}
+.bit.on{background:var(--hi);color:#fff;border-color:var(--hi)}
+.op.sel{background:var(--ac);color:#fff;border-color:var(--ac)}
+.res{font-family:monospace;font-size:16px}
+.big{font-size:22px;font-weight:700}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-family:monospace;font-size:13px;min-width:520px}
+th,td{border-bottom:1px solid var(--bd);padding:5px 6px;text-align:center}
+th{color:var(--mu)}
+.pass{color:var(--hi);font-weight:700}.fail{color:var(--bad);font-weight:700}
+.mu{color:var(--mu);font-size:13px}
+svg text{fill:var(--tx);font-family:monospace;font-size:11px}
+svg .box{fill:var(--card);stroke:var(--tx);stroke-width:1.5}
+</style></head><body>
+<h1>4-Bit Arithmetic Circuit</h1>
+<div class="mu">Add • Subtract • Increment • Decrement — 4-bit Full Adder + 4:1 MUX + control lines S1,S0</div>
+
+<div class="card">
+<h2>Inputs</h2>
+<div class="row"><span class="lbl">A</span><span id="A" class="row"></span><span class="mu" id="Ad"></span></div>
+<div class="row" style="margin-top:6px"><span class="lbl">B</span><span id="B" class="row"></span><span class="mu" id="Bd"></span></div>
+<div class="row" style="margin-top:10px" id="ops"></div>
+<div class="mu" id="opinfo" style="margin-top:6px"></div>
+</div>
+
+<div class="card">
+<h2>Output</h2>
+<div class="res"><span class="big" id="out"></span> &nbsp; <span id="outd"></span></div>
+<div class="res" id="flags" style="margin-top:6px"></div>
+<div class="res mu" id="eq" style="margin-top:6px"></div>
+</div>
+
+<div class="card">
+<h2>Circuit Diagram (live)</h2>
+<div class="mu">Green wire = logic 1, grey = logic 0. Bit 3 (MSB) left, bit 0 (LSB) right.</div>
+<div class="scroll"><svg id="svg" viewBox="0 0 720 330" width="720" height="330"></svg></div>
+</div>
+
+<div class="card">
+<h2>Function Table</h2>
+<div class="scroll"><table>
+<tr><th>S1</th><th>S0</th><th>Operation</th><th>MUX gives Y</th><th>Cin = S1⊕S0</th><th>Result</th></tr>
+<tr><td>0</td><td>0</td><td>ADD</td><td>B</td><td>0</td><td>A + B</td></tr>
+<tr><td>0</td><td>1</td><td>SUB</td><td>B' (NOT B)</td><td>1</td><td>A + B' + 1 = A − B</td></tr>
+<tr><td>1</td><td>0</td><td>INC</td><td>0000</td><td>1</td><td>A + 0 + 1 = A + 1</td></tr>
+<tr><td>1</td><td>1</td><td>DEC</td><td>1111</td><td>0</td><td>A + 1111 + 0 = A − 1</td></tr>
+</table></div>
+<div class="mu" style="margin-top:6px">Per bit: MUX out Yᵢ = S1'S0'·Bᵢ + S1'S0·Bᵢ' + S1S0'·0 + S1S0·1. Full adder: Sum = A⊕Y⊕Cin, Cout = A·Y + Cin·(A⊕Y).</div>
+</div>
+
+<div class="card">
+<h2>Verification</h2>
+<div class="row"><button id="runall">Run all 1024 tests (16×16×4)</button><span id="summary" class="res"></span></div>
+<div class="scroll" style="margin-top:8px"><table id="vt"></table></div>
+</div>
+
+<script>
+const OPN=["ADD","SUB","INC","DEC"],OPS=["A + B","A − B","A + 1","A − 1"];
+let A=5,B=3,op=0;
+const bits=n=>[3,2,1,0].map(i=>(n>>i)&1);
+const bin=n=>bits(n).join("");
+// gate-level model
+function mux4(s1,s0,b){return s1?(s0?1:0):(s0?1-b:b)}
+function fa(a,y,c){const x=a^y;return{s:x^c,c:(a&y)|(c&x)}}
+function calc(a,b,op){
+  const s1=op>>1,s0=op&1,cin=s1^s0,Y=[],S=[],C=[cin];
+  let c=cin;
+  for(let i=0;i<4;i++){const y=mux4(s1,s0,(b>>i)&1),r=fa((a>>i)&1,y,c);Y[i]=y;S[i]=r.s;c=r.c;C[i+1]=c}
+  const y=Y.reduce((t,v,i)=>t|v<<i,0),sum=S.reduce((t,v,i)=>t|v<<i,0);
+  return{Y,y,S,sum,C,cin,cout:c,ovf:C[4]^C[3]};
+}
+const expect=(a,b,op)=>[(a+b),(a-b),(a+1),(a-1)][op]&15;
+
+function build(){
+  for(const[k,id]of[["A","A"],["B","B"]]){
+    const el=document.getElementById(id);el.innerHTML="";
+    for(let i=3;i>=0;i--){const b=document.createElement("button");b.className="bit";b.dataset.i=i;b.dataset.k=k;
+      b.onclick=()=>{if(k=="A")A^=1<<i;else B^=1<<i;render()};el.appendChild(b)}
+  }
+  const o=document.getElementById("ops");
+  OPN.forEach((n,i)=>{const b=document.createElement("button");b.className="op";b.textContent=n;b.onclick=()=>{op=i;render()};o.appendChild(b)});
+}
+const wc=v=>v?"var(--hi)":"var(--lo)";
+function T(x,y,t,a="middle"){return`<text x="${x}" y="${y}" text-anchor="${a}">${t}</text>`}
+function L(d,v){return`<path d="${d}" fill="none" stroke="${wc(v)}" stroke-width="2.5"/>`}
+function draw(r){
+  const s1=op>>1,s0=op&1;let g="";
+  const dot=(x,y,v)=>`<circle cx="${x}" cy="${y}" r="9" fill="${v?"var(--hi)":"none"}" stroke="${wc(v)}" stroke-width="2"/>`+`<text x="${x}" y="${y+4}" text-anchor="middle" style="fill:${v?"#fff":"var(--tx)"};font-weight:700">${v}</text>`;
+  for(let col=0;col<4;col++){
+    const i=3-col,cx=100+col*140,a=(A>>i)&1,b=(B>>i)&1,y=r.Y[i],cin=r.C[i],cout=r.C[i+1];
+    // B input to mux
+    g+=L(`M${cx-35} 32 V70`,b)+dot(cx-35,24,b)+T(cx-35,10,"B"+i);
+    // A input
+    g+=L(`M${cx+22} 32 V190`,a)+dot(cx+22,24,a)+T(cx+22,10,"A"+i);
+    // mux
+    g+=`<rect class="box" x="${cx-62}" y="70" width="54" height="62" rx="4"/>`+T(cx-35,88,"4:1")+T(cx-35,100,"MUX")+T(cx-35,115,"sel:"+(s1?(s0?"1":"0"):(s0?"B'":"B")),"middle");
+    // mux out to FA
+    g+=L(`M${cx-35} 132 V160 H${cx-22} V190`,y)+T(cx-48,152,"Y"+i,"end");
+    // full adder
+    g+=`<rect class="box" x="${cx-45}" y="190" width="90" height="60" rx="5"/>`+T(cx,216,"FULL ADDER")+T(cx,232,"FA"+i);
+    // carry chain
+    if(col<3)g+=L(`M${cx+45} 220 H${cx+95}`,0)+""; // placeholder replaced below
+    // sum out
+    g+=L(`M${cx} 250 V292`,r.S[i])+dot(cx,300,r.S[i])+T(cx,324,"S"+i);
+  }
+  // carry wires: cout of bit i (left of box i) -> cin of bit i+1 (right of box i+1)
+  g=g.replace(/<path d="M\S+ 220 H\S+" fill="none" stroke="[^"]+" stroke-width="2.5"\/>/g,"");
+  for(let col=0;col<4;col++){
+    const i=3-col,cx=100+col*140;
+    // cin into right side of this FA
+    const cinv=r.C[i];
+    g+=L(`M${cx+105} 220 H${cx+45}`,cinv);
+    if(col<3)g+=T(cx+75,212,"C"+i);
+  }
+  // Cin generator
+  g+=`<rect class="box" x="655" y="150" width="58" height="140" rx="5" style="stroke-dasharray:3 3"/>`+T(684,166,"CONTROL")
+   +`<circle cx="684" cy="184" r="9" fill="${s1?"var(--hi)":"none"}" stroke="${wc(s1)}" stroke-width="2"/>`+T(684,188,"S1")
+   +`<circle cx="684" cy="212" r="9" fill="${s0?"var(--hi)":"none"}" stroke="${wc(s0)}" stroke-width="2"/>`+T(684,216,"S0")
+   +T(684,244,"XOR")+T(684,258,"Cin="+r.cin)
+   +`<path d="M655 220 H${100+3*140+105}" fill="none" stroke="${wc(r.cin)}" stroke-width="2.5"/>`;
+  // Cout (left of MSB FA)
+  g+=L(`M55 220 H30`,r.cout)+dot(18,220,r.cout)+T(18,246,"Cout");
+  g+=T(360,60,"S1="+s1+" S0="+s0+" → "+OPN[op],"middle").replace("<text",'<text style="font-weight:700;fill:var(--ac)"');
+  document.getElementById("svg").innerHTML=g;
+}
+function render(){
+  document.querySelectorAll(".bit").forEach(b=>{const v=((b.dataset.k=="A"?A:B)>>b.dataset.i)&1;b.textContent=v;b.classList.toggle("on",!!v)});
+  document.querySelectorAll(".op").forEach((b,i)=>b.classList.toggle("sel",i==op));
+  const r=calc(A,B,op),ex=expect(A,B,op);
+  Ad.textContent="= "+A;Bd.textContent="= "+B+(op>1?" (ignored)":"");
+  opinfo.textContent="S1S0 = "+(op>>1)+(op&1)+" → "+OPS[op]+"   (Cin = "+r.cin+")";
+  out.textContent=bin(r.sum);outd.textContent="= "+r.sum+" (signed "+(r.sum>7?r.sum-16:r.sum)+")";
+  const sub=op==1||op==3;
+  flags.innerHTML="Cout = "+r.cout+(sub?" → Borrow = "+(1-r.cout):" → Carry = "+r.cout)+" &nbsp; Overflow (signed) = "+r.ovf+" &nbsp; Zero = "+(r.sum==0?1:0);
+  eq.innerHTML=(op>1?"A":"A, B")+" → "+OPS[op].replace("A",A).replace("B",B)+" = "+ex+" (mod 16) &nbsp; "+(r.sum==ex?'<span class="pass">✔ matches</span>':'<span class="fail">✘ mismatch</span>');
+  draw(r);
+}
+function table(){
+  const S=[[5,3],[9,6],[15,1],[7,7],[12,10],[0,1],[8,8],[1,15],[6,0],[0,0],[15,15],[10,4]];
+  let h="<tr><th>Op</th><th>A</th><th>B</th><th>Expected</th><th>Circuit</th><th>Cout</th><th>Status</th></tr>";
+  for(let o=0;o<4;o++)for(const[a,b]of S.slice(o*3,o*3+3).concat(o==2||o==3?[[0,0]]:[[S[9][0],S[9][1]]]).slice(0,3)){
+    const r=calc(a,b,o),e=expect(a,b,o);
+    h+=`<tr><td>${OPN[o]}</td><td>${bin(a)}</td><td>${o>1?"----":bin(b)}</td><td>${bin(e)}</td><td>${bin(r.sum)}</td><td>${r.cout}</td><td class="${r.sum==e?"pass":"fail"}">${r.sum==e?"PASS":"FAIL"}</td></tr>`;
+  }
+  vt.innerHTML=h;
+}
+runall.onclick=()=>{let p=0,t=0;for(let o=0;o<4;o++)for(let a=0;a<16;a++)for(let b=0;b<16;b++){t++;if(calc(a,b,o).sum==expect(a,b,o))p++}
+  summary.innerHTML=`<span class="${p==t?"pass":"fail"}">${p}/${t} PASS</span>`};
+build();table();render();runall.click();
+</script></body></html>
